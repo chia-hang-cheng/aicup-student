@@ -1,0 +1,333 @@
+/**
+ * Numeracy Lab — Slide Presenter（自適應版）
+ * 翻頁：←/→、空白、PageUp/Down、Home/End、點畫面左1/3 或右2/3、觸控左右滑。
+ * 規劃模式（按 P）：投影片維持 16:9 置頂，規劃面板「往下展開」接在下方，往下捲才看完。
+ *   面板內＝該頁對應的完整逐字原文（也就是上台念的稿）＋小設計條。
+ *   原文存在每頁的 <aside class="plan-note">（永遠隱藏），由本檔複製進 #plan-panel。
+ *   列印（出 PDF）時規劃層自動隱藏（見 base.css @media print）。
+ * 總覽模式（按 O）：全部頁面縮圖格狀排列，點哪頁跳哪頁；Esc 或再按 O 關閉。
+ * 安全線（按 g）：切換 .slide-frame 安全框紅虛線（驗收內容有無爆框）。
+ * 動態開關（按 M）：一鍵關掉／打開所有進場動畫（在 <html> 加 .no-motion）。
+ *   設定記在 localStorage，同一台電腦下次開任何一份簡報都沿用。
+ *   若系統開了「減少動態效果」，預設就是關閉。
+ */
+(function () {
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  if (!slides.length) return;
+  const deck = document.querySelector('.deck');
+
+  let current = 0;
+
+  // Progress indicator
+  const progress = document.createElement('div');
+  progress.className = 'progress';
+  document.body.appendChild(progress);
+
+  // Mode hint（右上角小藥丸）
+  const hint = document.createElement('div');
+  hint.className = 'mode-hint';
+  document.body.appendChild(hint);
+
+  // 規劃面板（接在 .deck 之後，往下展開）
+  const planPanel = document.createElement('div');
+  planPanel.id = 'plan-panel';
+  document.body.appendChild(planPanel);
+
+  // 總覽層（按 O）
+  const overview = document.createElement('div');
+  overview.id = 'overview';
+  overview.style.cssText = 'position:fixed;inset:0;background:rgba(0,75,36,.97);z-index:800;display:none;overflow-y:auto;padding:2vw;box-sizing:border-box;';
+  document.body.appendChild(overview);
+
+  function planOn() { return document.body.classList.contains('mode-plan'); }
+  function overviewOn() { return overview.style.display !== 'none'; }
+
+  // 動態開關（按 M）
+  const MOTION_KEY = 'nl-deck-motion';
+  function motionOff() { return document.documentElement.classList.contains('no-motion'); }
+  function applyMotion(off) {
+    document.documentElement.classList.toggle('no-motion', off);
+    try { localStorage.setItem(MOTION_KEY, off ? 'off' : 'on'); } catch (e) {}
+    updateHint();
+  }
+  function toggleMotion() { applyMotion(!motionOff()); }
+
+  function updateHint() {
+    hint.textContent = planOn()
+      ? '規劃模式 · 按 P 收起'
+      : '簡報模式 · P 規劃 · O 總覽 · g 安全線 · M 動態：' + (motionOff() ? '關' : '開');
+  }
+
+  function updatePlan() {
+    const note = slides[current].querySelector('.plan-note');
+    planPanel.innerHTML = note
+      ? note.innerHTML
+      : '<div class="plan-note__source"><b>對應原文</b>（此頁無規劃資料）</div>';
+  }
+
+  function show(index) {
+    if (index < 0 || index >= slides.length) return;
+    slides[current].classList.remove('active');
+    current = index;
+    slides[current].classList.add('active');
+    progress.textContent = `${current + 1} / ${slides.length}`;
+    window.location.hash = current + 1;
+    updatePlan();
+    if (planOn()) window.scrollTo(0, 0);   // 換頁時回到投影片頂端
+  }
+
+  function next() { show(current + 1); }
+  function prev() { show(current - 1); }
+
+  function togglePlan() {
+    const on = !planOn();
+    document.body.classList.toggle('mode-plan', on);
+    document.documentElement.classList.toggle('mode-plan', on);
+    updateHint();
+    window.scrollTo(0, 0);
+  }
+
+  // --- 總覽：每次開啟時 clone 所有 slide 成縮圖（靜態快照），點擊跳頁 ---
+  // 自適應版要點：.slide 用 container-query 單位（cqw），縮圖必須先把 clone 放進一個
+  // 「100vw 寬、16:9」的 stage（讓 1cqw 重新等於 1vw，比例與真實舞台一致），再用
+  // transform:scale() 把整個 stage 縮到 cell 大小。clone 不加 .active（避免觸發
+  // body:has() 底色延伸 / 影響真實頁），改用 inline opacity:1 顯示。
+  const OV_COLS = 4;
+  const STAGE_W = 100;                       // vw：縮圖內部參考舞台寬（= 16:9 螢幕的舞台寬）
+  function buildOverview() {
+    overview.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.style.cssText = `display:grid;grid-template-columns:repeat(${OV_COLS},1fr);gap:1.2vw;`;
+    slides.forEach((s, i) => {
+      const cellW = 100 / OV_COLS - 1.5;     // vw
+      const cellH = cellW * 9 / 16;
+      const factor = cellW / STAGE_W;
+      const cell = document.createElement('div');
+      cell.style.cssText = `position:relative;width:${cellW}vw;height:${cellH}vw;overflow:hidden;border-radius:.4vw;cursor:pointer;outline:${i === current ? '.25vw solid #E8FF3A' : '1px solid rgba(255,255,255,.25)'};background:#fff;`;
+      const stage = document.createElement('div');
+      stage.style.cssText = `position:absolute;top:0;left:0;width:${STAGE_W}vw;aspect-ratio:16/9;background:#fff;overflow:hidden;container-type:inline-size;transform:scale(${factor});transform-origin:top left;`;
+      const clone = s.cloneNode(true);
+      clone.classList.remove('active');   // 縮圖不可帶 active，否則觸發 body:has() 底色延伸、卡住整頁底色
+      clone.style.cssText += ';opacity:1;pointer-events:none;transition:none;';
+      stage.appendChild(clone);
+      const tag = document.createElement('div');
+      tag.textContent = i + 1;
+      tag.style.cssText = 'position:absolute;right:.4vw;bottom:.3vw;z-index:5;font:700 .9vw "Noto Sans TC",sans-serif;color:#fff;background:rgba(0,75,36,.85);border-radius:.3vw;padding:.05vw .45vw;';
+      cell.appendChild(stage);
+      cell.appendChild(tag);
+      cell.addEventListener('click', (e) => {
+        e.stopPropagation();
+        toggleOverview(false);
+        show(i);
+      });
+      grid.appendChild(cell);
+    });
+    overview.appendChild(grid);
+  }
+  function toggleOverview(force) {
+    const on = force !== undefined ? force : !overviewOn();
+    if (on) buildOverview();
+    overview.style.display = on ? 'block' : 'none';
+  }
+
+  // Keyboard
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && overviewOn()) { e.preventDefault(); toggleOverview(false); return; }
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+      e.preventDefault();
+      next();
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      e.preventDefault();
+      prev();
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      show(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      show(slides.length - 1);
+    } else if (e.key === 'p' || e.key === 'P') {
+      e.preventDefault();
+      togglePlan();
+    } else if (e.key === 'o' || e.key === 'O') {
+      e.preventDefault();
+      toggleOverview();
+    } else if (e.key === 'g' || e.key === 'G') {
+      e.preventDefault();
+      if (deck) deck.classList.toggle('safe-guides');   // 切換內容安全區輔助線
+    } else if (e.key === 'm' || e.key === 'M') {
+      e.preventDefault();
+      toggleMotion();                                   // 切換進場動畫
+    }
+  });
+
+  // Click 翻頁（左 1/3 上一頁、右 2/3 下一頁）。規劃/總覽模式停用點擊翻頁。
+  document.addEventListener('click', function (e) {
+    if (planOn() || overviewOn()) return;
+    if (e.target.closest('a, button, input, textarea, #plan-panel, .plan-note')) return;
+    if (e.clientX < window.innerWidth / 3) { prev(); } else { next(); }
+  });
+
+  // Touch swipe（規劃/總覽模式停用，讓使用者正常上下捲）
+  let touchStartX = 0;
+  document.addEventListener('touchstart', function (e) {
+    touchStartX = e.changedTouches[0].clientX;
+  });
+  document.addEventListener('touchend', function (e) {
+    if (planOn() || overviewOn()) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 50) { dx < 0 ? next() : prev(); }
+  });
+
+  // Init: 動態開關（記住的設定 > 系統「減少動態效果」偏好）
+  let motionStored = null;
+  try { motionStored = localStorage.getItem(MOTION_KEY); } catch (e) {}
+  const prefersReduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  document.documentElement.classList.toggle('no-motion', motionStored ? motionStored === 'off' : !!prefersReduce);
+
+  // Init: check hash or start at slide 1
+  const hash = parseInt(window.location.hash.slice(1), 10);
+  show(hash > 0 && hash <= slides.length ? hash - 1 : 0);
+  updatePlan();
+  updateHint();
+})();
+
+/* ── 按一下逐步（.stepclick）導覽與重設（老師 2026-10-14）──
+   1. 回到一頁時，這頁的逐步互動全部重設，可以重新按（離開後就重設）。
+   2. → ／空白鍵／PageDown／點右邊：這頁還有沒出來的步驟時，先出下一步，全部出完才翻頁。
+   3. ← ／PageUp／點左邊：這頁已經出過步驟時，先退回上一步，退到最前面才回上一頁。
+   支援兩種寫法：單步（onclick 加 is-done）與多步（data-n＋data-k＋s1…sN）。
+   也一併重設 .optbtn 選答（is-ans）與 .rvz 揭曉（is-open）。 */
+(function () {
+  if (window.__stepNav) return; window.__stepNav = true;
+  function editing() { var r = document.documentElement; return r.classList.contains('edit-on') || r.classList.contains('plan-on') || document.body.classList.contains('overview-on'); }
+  function active() { return document.querySelector('.deck > .slide.active'); }
+  function steps(slide) { return slide ? Array.from(slide.querySelectorAll('.stepclick')) : []; }
+  function total(el) { return +el.dataset.n || 1; }
+  function done(el) { return +el.dataset.k || (el.classList.contains('is-done') ? total(el) : 0); }
+  function syncSlide(slide) {
+    var all = steps(slide), fin = all.length && all.every(function (el) { return done(el) >= total(el); });
+    if (slide.classList.contains('is-stepdone') !== !!fin) slide.classList.toggle('is-stepdone', !!fin);
+  }
+  function forward(slide) {
+    var el = steps(slide).find(function (x) { return done(x) < total(x); });
+    if (!el) return false;
+    el.click();                                   // 交給這個元件自己的 onclick（動畫、class 都照原本的寫法）
+    return true;
+  }
+  function back(slide) {
+    var el = steps(slide).reverse().find(function (x) { return done(x) > 0; });
+    if (!el) return false;
+    var k = done(el);
+    if (el.dataset.n) {
+      el.classList.remove('s' + k);
+      k -= 1;
+      if (k > 0) el.dataset.k = k; else delete el.dataset.k;
+    }
+    else k = 0;
+    if (k < total(el)) el.classList.remove('is-done');
+    syncSlide(slide);
+    return true;
+  }
+  function reset(slide) {
+    steps(slide).forEach(function (el) {
+      Array.from(el.classList).forEach(function (c) { if (/^s\d+$/.test(c)) el.classList.remove(c); });
+      if (el.classList.contains('is-done')) el.classList.remove('is-done'); delete el.dataset.k;
+    });
+    if (slide.classList.contains('is-stepdone')) slide.classList.remove('is-stepdone');
+    slide.querySelectorAll('.is-ans').forEach(function (el) { el.classList.remove('is-ans'); });
+    slide.querySelectorAll('.is-open').forEach(function (el) { el.classList.remove('is-open'); });
+  }
+  window.stepNav = { forward: forward, back: back, reset: reset };
+
+  document.addEventListener('keydown', function (e) {
+    if (editing() || e.altKey || e.ctrlKey || e.metaKey) return;
+    var s = active(); if (!s) return;
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+      if (forward(s)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+      if (back(s)) { e.preventDefault(); e.stopImmediatePropagation(); }
+    }
+  }, true);
+  document.addEventListener('click', function (e) {
+    if (editing()) return;
+    if (e.target.closest('a, button, input, textarea, #plan-panel, .plan-note, #edit-bar, #overview, .stepclick, .optbtn, .rvz__cover')) return;
+    var s = active(); if (!s) return;
+    var ok = e.clientX < window.innerWidth / 3 ? back(s) : forward(s);
+    if (ok) { e.preventDefault(); e.stopImmediatePropagation(); }
+  }, true);
+  // 離開一頁就重設（等淡出跑完），回來時是乾淨的初始狀態。只在「active → 非 active」那一刻觸發。
+  document.querySelectorAll('.deck > .slide').forEach(function (s) {
+    new MutationObserver(function (muts) {
+      var left = muts.some(function (m) { return /(^|\s)active(\s|$)/.test(m.oldValue || '') && !s.classList.contains('active'); });
+      if (left) setTimeout(function () { if (!s.classList.contains('active')) reset(s); }, 450);
+    }).observe(s, { attributes: true, attributeFilter: ['class'], attributeOldValue: true });
+  });
+})();
+
+/* ── 倒數計時器（.r2-timer，data-sec 秒數；11/07 從教師研習版搬來）──
+   點一下開始／暫停；時間到變紅閃爍，再點一下重來。 */
+(function () {
+  if (window.__r2Timer) return; window.__r2Timer = true;
+  function fmt(x) { return Math.floor(x / 60) + ':' + String(x % 60).padStart(2, '0'); }
+  document.querySelectorAll('.r2-timer').forEach(function (b) {
+    var total = +b.dataset.sec, left = total, t = null;
+    function stop() { clearInterval(t); t = null; b.classList.remove('is-run'); }
+    // 可調時間（.x7-ctimer 裡的 ± 按鈕；記住上次設定的分鐘數）
+    var box = b.closest('.x7-ctimer');
+    if (box) {
+      var all = Array.prototype.slice.call(document.querySelectorAll('.x7-ctimer .r2-timer'));
+      var key = 'aicup-ctimer-' + all.indexOf(b);
+      function setTotal(sec) { stop(); total = Math.max(60, Math.min(60 * 60, sec)); left = total; b.classList.remove('is-done', 'is-low'); b.textContent = fmt(left); try { localStorage.setItem(key, total); } catch (e) {} }
+      try { var saved = +localStorage.getItem(key); if (saved >= 60) { total = left = saved; b.textContent = fmt(left); } } catch (e) {}
+      box.querySelectorAll('.x7-ctimer__adj').forEach(function (a) {
+        a.addEventListener('click', function (e) { e.stopPropagation(); a.blur(); if (!t) setTotal(total + (+a.dataset.d)); });
+      });
+    }
+    b.addEventListener('click', function (e) {
+      e.stopPropagation(); b.blur();
+      if (b.classList.contains('is-done')) { left = total; b.classList.remove('is-done', 'is-low'); b.textContent = fmt(left); return; }
+      if (t) { stop(); return; }
+      b.classList.add('is-run');
+      t = setInterval(function () {
+        left--; b.textContent = fmt(left); if (left <= 10) b.classList.add('is-low');
+        if (left <= 0) { stop(); b.classList.add('is-done'); b.textContent = '時間到'; }
+      }, 1000);
+    });
+  });
+})();
+
+/* ── 內嵌影片（.st-video--local，11/17）──
+   → ／空白／PageDown（簡報筆「下一頁」）：影片還沒播 → 開始播放，不翻頁；
+   播放中或播完再按 → 才翻頁。點影片本身＝播放／暫停。離開這頁自動停止並回到開頭。 */
+(function () {
+  if (window.__localVideo) return; window.__localVideo = true;
+  function editing() { var r = document.documentElement; return r.classList.contains('edit-on') || r.classList.contains('plan-on'); }
+  function box() { var s = document.querySelector('.deck > .slide.active'); return s ? s.querySelector('.st-video--local') : null; }
+  function sync(b) {
+    var v = b.querySelector('video');
+    b.classList.toggle('is-started', v.currentTime > 0 || !v.paused);
+    b.classList.toggle('is-playing', !v.paused && !v.ended);
+    b.classList.toggle('is-paused', v.paused && v.currentTime > 0 && !v.ended);
+  }
+  function play(b) { var v = b.querySelector('video'); var p = v.play(); if (p && p.catch) p.catch(function () {}); }
+  document.querySelectorAll('.st-video--local').forEach(function (b) {
+    var v = b.querySelector('video');
+    ['play', 'pause', 'ended', 'timeupdate'].forEach(function (ev) { v.addEventListener(ev, function () { sync(b); }); });
+    b.addEventListener('click', function (e) {
+      if (editing()) return;
+      e.preventDefault(); e.stopImmediatePropagation();
+      if (v.paused) play(b); else v.pause();
+    });
+    var s = b.closest('.slide');
+    new MutationObserver(function () {
+      if (!s.classList.contains('active')) { v.pause(); try { v.currentTime = 0; } catch (err) {} b.classList.remove('is-started', 'is-playing', 'is-paused'); }
+    }).observe(s, { attributes: true, attributeFilter: ['class'] });
+  });
+  window.addEventListener('keydown', function (e) {
+    if (editing() || e.altKey || e.ctrlKey || e.metaKey) return;
+    if (!(e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown')) return;
+    var b = box(); if (!b) return;
+    var v = b.querySelector('video');
+    if (v.paused && !v.ended) { e.preventDefault(); e.stopImmediatePropagation(); play(b); }
+  }, true);
+})();
