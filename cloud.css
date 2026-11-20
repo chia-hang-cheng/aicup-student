@@ -102,3 +102,8 @@ body:hover .cl-badge{opacity:.9;}
 .x8-steps li em{font-style:normal;font-weight:900;color:var(--nx-teal);}
 .x8-parent__warn{margin-top:calc(1.4*var(--u));font-size:calc(2*var(--u));padding:calc(.8*var(--u)) calc(1.6*var(--u));}
 .x8-parent__warn b{display:inline;font-size:calc(2.3*var(--u));margin-right:calc(.6*var(--u));}
+
+/* 右上角操作提示：4 秒後淡出，免得擋到頁面右上的 QR（規劃模式照常顯示） */
+@keyframes x9-hint-out{to{opacity:0;visibility:hidden;}}
+.mode-hint{animation:x9-hint-out .8s ease 4s forwards;}
+body.mode-plan .mode-hint{animation:none;opacity:1;visibility:visible;}
