@@ -45,6 +45,22 @@
     if (!KNOWN[k]) show('收到按鍵：' + (k === ' ' ? '空白鍵' : k) + '（不是換頁鍵）');
   }, true);
 
-  // 載入後讓頁面拿到焦點，簡報筆的按鍵才送得進來
+  // 頁面沒有焦點時（例如在 claude.ai 外框裡、剛點過網址列），簡報筆的按鍵送不進來 → 上方提示「先點一下畫面」
   window.addEventListener('load', function () { try { window.focus(); } catch (e) {} });
+  var hint;
+  function syncHint() {
+    if (!document.body) return;
+    if (!hint) {
+      hint = document.createElement('div');
+      hint.textContent = '簡報筆沒反應？先用滑鼠點一下畫面';
+      hint.style.cssText = 'position:fixed;left:50%;top:12px;transform:translateX(-50%);z-index:99999;padding:8px 18px;border-radius:999px;' +
+        'background:#CF3A17;color:#fff;font:600 16px/1.4 "Noto Sans TC","Microsoft JhengHei",sans-serif;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.2)';
+      document.body.appendChild(hint);
+    }
+    hint.hidden = document.hasFocus();
+  }
+  window.addEventListener('focus', syncHint);
+  window.addEventListener('blur', function () { setTimeout(syncHint, 50); });
+  window.addEventListener('load', function () { setTimeout(syncHint, 300); });
+  setInterval(syncHint, 1500);
 })();
